@@ -2,6 +2,10 @@
 /build/
 /dist/
 
+# Your ROM goes in rom/; only the README there is tracked
+/rom/*
+!/rom/README.md
+
 # Never commit ROMs or patches made from them by accident
 *.z64
 *.n64

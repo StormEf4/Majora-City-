@@ -47,30 +47,34 @@ gate radius need an emulator pass, and the checklist is in the storyboard doc. F
 | [Architecture](docs/tech/architecture.md) | How the hack is built on the decomp, hooks, save layout, ID ranges |
 | [Custom models](docs/tech/custom-models.md) | Procedural and Blender/Fast64 pipelines, budgets, style |
 
-## Playing it (once a release is out)
+## Playing it
 
-Releases ship as **`majora-city.bps`**. You need your own dump of *Majora's Mask* (USA, N64) in `.z64`, `.n64`
-or `.v64` format:
+Patches are named **`MajoraCity-vX.Y.Z.bps`**. You need your own dump of *Majora's Mask* (USA, N64) in `.z64`,
+`.n64` or `.v64` format. The easiest way is [Rom Patcher JS](https://www.marcrobledo.com/RomPatcher.js/) in a
+browser. [Flips](https://github.com/Alcaro/Flips) or `./majora-city patch your-rom.z64 MajoraCity-vX.Y.Z.bps`
+work too. Play on an accurate emulator (Ares recommended) or real hardware with an Expansion Pak.
 
-```bash
-python3 tools/bps.py apply "Majora's Mask (USA).z64" majora-city.bps majora-city.z64
-```
+## Building the patch
 
-[Flips](https://github.com/Alcaro/Flips) and [Rom Patcher JS](https://www.marcrobledo.com/RomPatcher.js/) work
-too. Play on an accurate emulator (Ares recommended) or real hardware with an Expansion Pak.
-
-## Building it
-
-Requirements (Linux or WSL; the same as the decomp's):
-```bash
-sudo apt install git build-essential binutils-mips-linux-gnu curl python3 python3-pip python3-venv libpng-dev libxml2-dev
-```
+One command, on Linux, Windows (via WSL: double-click `majora-city.cmd`) or macOS:
 
 ```bash
 git clone https://github.com/StormEf4/Majora-City-.git && cd Majora-City-
-tools/setup.sh "/path/to/Majora's Mask (USA).z64"   # once: fetches the decomp, extracts assets, builds vanilla
-tools/build.sh                                      # builds the hack and writes dist/majora-city.bps
+cp "/path/to/Majora's Mask (USA).z64" rom/      # or give the path to the command, or drag it in when asked
+./majora-city build
 ```
+
+It checks your computer (and offers to install missing tools), checks your ROM is the right one, does the one-time
+setup, builds, and writes:
+
+```
+dist/MajoraCity-v0.1.0.bps   the patch
+dist/MajoraCity-v0.1.0.zip   patch + how-to-play + changelog, ready to share
+dist/MajoraCity-v0.1.0.z64   your playable ROM (don't share it)
+```
+
+**Every update after that:** `./majora-city update`, which pulls the latest changes and builds the new patch.
+Full step-by-step guide per OS and troubleshooting: **[BUILDING.md](BUILDING.md)**.
 
 Contributors without a ROM can still verify their changes:
 
@@ -88,7 +92,10 @@ mod/            new files, laid out as they go into the decomp tree
   src/overlays/actors/ovl_Mc_Skyline/  procedural skyline (+ generated data)
   assets/text/mc_message_data.h   Majora City text bank
 patches/        small diffs to decomp files (actor table, spec, save layout, hooks, text)
-tools/          setup / apply / build / check, bps.py, gen_skyline.py, preview_skyline.py
+majora-city     the one-command builder (majora-city.cmd on Windows)
+rom/            put your ROM here (never committed)
+tools/          apply, check, test_cli, rom.py, bps.py, gen_skyline.py, preview_skyline.py
+VERSION         patch version; CHANGELOG.md says what changed
 docs/           design and technical docs
 decomp.lock     the zeldaret/mm commit we build against
 ```

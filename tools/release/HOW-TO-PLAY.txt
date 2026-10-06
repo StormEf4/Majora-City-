@@ -1,0 +1,29 @@
+MAJORA CITY {LABEL}
+===================
+
+A fan-made ROM hack of The Legend of Zelda: Majora's Mask (N64). This zip contains a PATCH, not the game.
+You need your own copy of the game.
+
+WHAT YOU NEED
+  A dump of The Legend of Zelda: Majora's Mask (USA) for the Nintendo 64.
+  .z64, .n64 and .v64 files all work. It must be the original, unmodified USA cartridge dump:
+  MD5 {MD5}
+
+HOW TO PATCH (easiest)
+  1. Open https://www.marcrobledo.com/RomPatcher.js/ in your browser.
+  2. "ROM file": pick your Majora's Mask (USA) file.
+  3. "Patch file": pick {BPS}
+  4. Click "Apply patch" and save the new ROM.
+
+  Other ways: Flips (Windows/macOS/Linux), or from the Majora City folder:
+     ./majora-city patch "your-rom.z64" {BPS}
+
+  If the patcher says the checksum doesn't match, your ROM isn't the clean USA version.
+
+HOW TO PLAY
+  Open the patched ROM in an N64 emulator (Ares is recommended; RetroArch with the
+  Mupen64Plus-Next core also works) or on real hardware with a flash cart and Expansion Pak.
+  Start a NEW save file to see the new opening.
+
+What changed in this version: see CHANGELOG.txt.
+Majora City is a non-commercial fan project, not affiliated with Nintendo.

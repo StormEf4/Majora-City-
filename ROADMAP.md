@@ -12,8 +12,10 @@ and the vertical slice; later ones fill the city with content. Design details li
 - ✅ Project vision, story bible, world, cast, mechanics, masks and side-mission design docs
 - ✅ Pinned decompilation base ([zeldaret/mm](https://github.com/zeldaret/mm), see `decomp.lock`)
 - ✅ Overlay workflow: `mod/` (new files) + `patches/` (diffs to decomp files) → `tools/apply.sh`
-- ✅ Build, check (no ROM needed; includes an IDO 7.1 compile), and BPS patch tooling (`tools/build.sh`,
-  `tools/check.sh`, `tools/bps.py`, cross-checked against an independent BPS implementation)
+- ✅ Build, check (no ROM needed; includes an IDO 7.1 compile), and BPS patch tooling (`tools/check.sh`,
+  `tools/bps.py`, cross-checked against an independent BPS implementation)
+- ✅ One-command builder `./majora-city` (`build` / `update` / `doctor` / `patch` / `info`): ROM validation,
+  automatic one-time setup, incremental rebuilds, versioned patch + share zip, Windows launcher, end-to-end tested
 - ✅ Core module `mc_core.c`: story/cycle flags, scene-augmentation spawner, cycle-reset hook
 - ✅ Majora City save block (`McSaveData`, 84 bytes) placed in the unused `SaveInfo.unk_DF4` region, so the save size is unchanged
 - ✅ Custom text bank (`mod/assets/text/mc_message_data.h`, IDs `0x4D00`+)

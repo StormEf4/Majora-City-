@@ -1,0 +1,534 @@
+#!/usr/bin/env bash
+# Majora City: one command to build the patch.
+#
+#   ./majora-city build [ROM]     build dist/MajoraCity-v<version>.bps (first run sets everything up)
+#   ./majora-city update          download the latest Majora City changes, then build
+#   ./majora-city doctor          check this computer has what the build needs (--install to install it)
+#   ./majora-city patch ROM BPS   apply a Majora City patch to your ROM
+#   ./majora-city info BPS        show which version a patch is
+#   ./majora-city clean [--all]   remove build output (--all: the whole workspace; your ROM folder is kept)
+#
+# Run ./majora-city help for details.
+
+# macOS ships bash 3.2; the scripts need bash 4+. Re-run with Homebrew's bash if it's there.
+if [ -z "${BASH_VERSINFO:-}" ] || [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
+    for b in /opt/homebrew/bin/bash /usr/local/bin/bash; do
+        [ -x "$b" ] && exec "$b" "$0" "$@"
+    done
+    echo "Majora City needs bash 4 or newer. On macOS run: brew install bash" >&2
+    exit 1
+fi
+
+source "$(dirname "${BASH_SOURCE[0]}")/tools/common.sh"
+
+VERSION="$(tr -d ' \n\r' < "$REPO_ROOT/VERSION")"
+ROM_DIR="$REPO_ROOT/rom"
+DIST_DIR="$REPO_ROOT/dist"
+LOG_DIR="$(dirname "$DECOMP_DIR")/logs"
+STAMP="$DECOMP_DIR/.mc_setup_stamp"
+BASEROM="$DECOMP_DIR/baseroms/$MC_VERSION/baserom.z64"
+USA_MD5="2a0a8acb61538235bc1094d297fb6556"
+
+JOBS="${JOBS:-$(nproc 2> /dev/null || sysctl -n hw.ncpu 2> /dev/null || echo 4)}"
+VERBOSE=0
+ASSUME_YES=0
+
+# ------------------------------------------------------------------------------------------------------------------
+# Output
+# ------------------------------------------------------------------------------------------------------------------
+
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    B=$'\033[1m' DIM=$'\033[2m' RED=$'\033[1;31m' GRN=$'\033[1;32m' YEL=$'\033[1;33m' MAG=$'\033[1;35m' R=$'\033[0m'
+else
+    B="" DIM="" RED="" GRN="" YEL="" MAG="" R=""
+fi
+
+STEP=0
+STEPS=6
+step() { STEP=$((STEP + 1)); printf '\n%s[%d/%d]%s %s%s%s\n' "$MAG" "$STEP" "$STEPS" "$R" "$B" "$*" "$R"; }
+ok() { printf '      %s✓%s %s\n' "$GRN" "$R" "$*"; }
+note() { printf '      %s\n' "$*"; }
+warn() { printf '      %s!%s %s\n' "$YEL" "$R" "$*"; }
+fail() {
+    printf '\n%s✗ %s%s\n' "$RED" "$1" "$R" >&2
+    shift
+    for line in "$@"; do printf '  %s\n' "$line" >&2; done
+    exit 2
+}
+
+fmt_time() { printf '%dm%02ds' $(($1 / 60)) $(($1 % 60)); }
+
+# Run a long command with its output in a log file and a live timer on screen.
+run_logged() {
+    local log="$1"
+    shift
+    mkdir -p "$(dirname "$log")"
+    if [ "$VERBOSE" = 1 ]; then
+        "$@" 2>&1 | tee "$log"
+        return "${PIPESTATUS[0]}"
+    fi
+    "$@" > "$log" 2>&1 &
+    local pid=$! start=$SECONDS status
+    trap 'kill "$pid" 2>/dev/null; printf "\n"; exit 130' INT TERM
+    if [ -t 1 ]; then
+        while kill -0 "$pid" 2> /dev/null; do
+            printf '\r      %sworking... %s%s ' "$DIM" "$(fmt_time $((SECONDS - start)))" "$R"
+            sleep 1
+        done
+        printf '\r\033[K'
+    fi
+    status=0
+    wait "$pid" || status=$?
+    trap - INT TERM
+    return "$status"
+}
+
+show_log_tail() {
+    printf '\n%s--- last lines of %s ---%s\n' "$DIM" "$1" "$R" >&2
+    tail -n 25 "$1" >&2 || true
+    printf '%s---%s\n' "$DIM" "$R" >&2
+}
+
+confirm() {
+    [ "$ASSUME_YES" = 1 ] && return 0
+    [ -t 0 ] || return 1
+    local answer
+    read -r -p "      $1 [Y/n] " answer
+    [[ -z "$answer" || "$answer" =~ ^[Yy] ]]
+}
+
+# ------------------------------------------------------------------------------------------------------------------
+# doctor
+# ------------------------------------------------------------------------------------------------------------------
+
+APT_PACKAGES=()
+MISSING=()
+
+need() { MISSING+=("$1"); [ -n "${2:-}" ] && APT_PACKAGES+=("$2"); return 0; }
+
+check_prereqs() {
+    APT_PACKAGES=()
+    MISSING=()
+    command -v git > /dev/null || need "git" git
+    command -v make > /dev/null || need "make" build-essential
+    command -v gcc > /dev/null || need "a C compiler (gcc)" build-essential
+    command -v g++ > /dev/null || need "a C++ compiler (g++)" build-essential
+    command -v curl > /dev/null || need "curl" curl
+    command -v iconv > /dev/null || need "iconv" libc-bin
+    if ! command -v python3 > /dev/null; then
+        need "Python 3.10+" python3
+    else
+        python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || need "Python 3.10 or newer (found $(python3 -V 2>&1))" python3
+        python3 -c 'import venv, ensurepip' 2> /dev/null || need "Python venv support" python3-venv
+        python3 -c 'import pip' 2> /dev/null || need "pip" python3-pip
+    fi
+    command -v "${MIPS_BINUTILS_PREFIX:-mips-linux-gnu-}ld" > /dev/null || need "MIPS binutils (mips-linux-gnu-ld)" binutils-mips-linux-gnu
+    if command -v gcc > /dev/null; then
+        echo '#include <png.h>' | gcc -E -x c - > /dev/null 2>&1 || need "libpng (development files)" libpng-dev
+        echo '#include <libxml/parser.h>' | gcc -E -x c -I/usr/include/libxml2 -I/opt/homebrew/include/libxml2 \
+            -I/usr/local/include/libxml2 - > /dev/null 2>&1 || need "libxml2 (development files)" libxml2-dev
+    fi
+}
+
+install_hint() {
+    if [ "$(uname -s)" = Darwin ]; then
+        echo "On macOS: brew install coreutils make python3 libpng bash libxml2 libiconv"
+        echo "MIPS binutils must be built from source: see https://github.com/zeldaret/mm/blob/main/docs/BUILDING_MACOS.md"
+    elif command -v apt-get > /dev/null; then
+        echo "Install them with: ./majora-city doctor --install"
+        echo "  (runs: sudo apt-get install -y ${APT_PACKAGES[*]})"
+    else
+        echo "Install the equivalents of these Debian/Ubuntu packages: ${APT_PACKAGES[*]}"
+        echo "Or use Ubuntu under WSL/Docker; see BUILDING.md."
+    fi
+}
+
+install_prereqs() {
+    command -v apt-get > /dev/null || fail "Automatic install only works on Debian/Ubuntu (including WSL)." "$(install_hint)"
+    local sudo=""
+    [ "$(id -u)" = 0 ] || sudo="sudo"
+    # Unique package list, keeping order.
+    local pkgs
+    pkgs="$(printf '%s\n' "${APT_PACKAGES[@]}" | awk '!seen[$0]++' | tr '\n' ' ')"
+    note "Installing: $pkgs"
+    $sudo apt-get update -q || fail "apt-get update failed."
+    # shellcheck disable=SC2086
+    $sudo apt-get install -y $pkgs || fail "Installing the packages failed."
+}
+
+disk_free_gb() {
+    local dir
+    dir="$(dirname "$DECOMP_DIR")"
+    mkdir -p "$dir"
+    df -Pk "$dir" | awk 'NR==2 { printf "%d", $4 / 1048576 }'
+}
+
+cmd_doctor() {
+    local install=0
+    for a in "$@"; do
+        case "$a" in
+            --install) install=1 ;;
+            --yes | -y) ASSUME_YES=1 ;;
+            *) fail "Unknown option for doctor: $a" ;;
+        esac
+    done
+    check_prereqs
+    if [ ${#MISSING[@]} -eq 0 ]; then
+        ok "Everything the build needs is installed."
+    else
+        warn "Missing:"
+        for m in "${MISSING[@]}"; do note "  - $m"; done
+        if [ "$install" = 1 ]; then
+            install_prereqs
+            check_prereqs
+            [ ${#MISSING[@]} -eq 0 ] || fail "Still missing: ${MISSING[*]}"
+            ok "All set."
+        else
+            install_hint | while IFS= read -r line; do note "$line"; done
+            return 1
+        fi
+    fi
+    local free
+    free="$(disk_free_gb)"
+    if [ "$free" -lt 4 ]; then
+        warn "Only ${free} GB free near $DECOMP_DIR; the first build needs about 4 GB."
+    else
+        ok "${free} GB free disk space."
+    fi
+    if [[ "$REPO_ROOT" == /mnt/* ]]; then
+        note "WSL detected: the build workspace lives in $DECOMP_DIR (faster than the Windows drive)."
+    fi
+}
+
+# ------------------------------------------------------------------------------------------------------------------
+# ROM discovery
+# ------------------------------------------------------------------------------------------------------------------
+
+# Turn whatever a user pasted or dragged into the terminal into a usable path.
+clean_path() {
+    local p="$1"
+    p="${p#"${p%%[![:space:]]*}"}" # trim leading space
+    p="${p%"${p##*[![:space:]]}"}" # trim trailing space
+    if [[ "$p" == \'*\' || "$p" == \"*\" ]]; then
+        p="${p:1:${#p}-2}"
+    fi
+    p="${p//\\ / }" # unescape "\ " from drag-and-drop
+    p="${p/#\~/$HOME}"
+    if [[ "$p" =~ ^[A-Za-z]:\\ ]] && command -v wslpath > /dev/null; then
+        p="$(wslpath -u "$p")"
+    fi
+    printf '%s' "$p"
+}
+
+rom_candidates() {
+    [ -d "$ROM_DIR" ] || return 0
+    find "$ROM_DIR" -maxdepth 1 -type f \( -iname '*.z64' -o -iname '*.n64' -o -iname '*.v64' -o -iname '*.zip' \) | sort
+}
+
+# Sets ROM_SRC to a usable ROM file, or ROM_SRC="" when the previously installed copy is still good.
+find_rom() {
+    local arg="${1:-}" c
+    ROM_SRC=""
+    if [ -n "$arg" ]; then
+        arg="$(clean_path "$arg")"
+        if python3 "$REPO_ROOT/tools/rom.py" identify "$arg" > /dev/null 2> "$LOG_DIR/rom.txt"; then
+            ROM_SRC="$arg"
+            return 0
+        fi
+        fail "This ROM can't be used." "$(cat "$LOG_DIR/rom.txt")"
+    fi
+
+    # Already installed by an earlier build?
+    if [ -f "$STAMP" ] && [ -f "$BASEROM" ] && grep -q "^ROM_MD5=" "$STAMP"; then
+        return 0
+    fi
+
+    local reasons=""
+    while IFS= read -r c; do
+        [ -n "$c" ] || continue
+        if python3 "$REPO_ROOT/tools/rom.py" identify "$c" > /dev/null 2> "$LOG_DIR/rom.txt"; then
+            ROM_SRC="$c"
+            return 0
+        fi
+        reasons+="$(cat "$LOG_DIR/rom.txt")"$'\n'
+    done < <(rom_candidates)
+    if [ -n "$reasons" ]; then
+        fail "No usable ROM in the rom/ folder." "${reasons%$'\n'}"
+    fi
+
+    if [ -t 0 ]; then
+        printf '\n      %sMajora City needs your own dump of The Legend of Zelda: Majora'"'"'s Mask (USA).%s\n' "$B" "$R"
+        printf '      Drag the ROM file onto this window (or type its path) and press Enter:\n      > '
+        local typed
+        read -r typed
+        [ -n "$typed" ] || fail "No ROM given."
+        find_rom "$typed"
+        return 0
+    fi
+    fail "No ROM found." \
+        "Put your Majora's Mask (USA) ROM (.z64, .n64, .v64 or a .zip) in the rom/ folder, or run:" \
+        "  ./majora-city build \"/path/to/your/rom.z64\""
+}
+
+# ------------------------------------------------------------------------------------------------------------------
+# build
+# ------------------------------------------------------------------------------------------------------------------
+
+stamp_value() { grep "^$1=" "$STAMP" 2> /dev/null | cut -d= -f2-; }
+
+setup_needed() {
+    [ -f "$STAMP" ] || { SETUP_REASON="first build on this computer"; return 0; }
+    [ -d "$DECOMP_DIR/extracted/$MC_VERSION" ] || { SETUP_REASON="the extracted game files are missing"; return 0; }
+    if [ "$(stamp_value DECOMP_COMMIT)" != "$DECOMP_COMMIT" ]; then
+        SETUP_REASON="this update moved to a newer decompilation"
+        return 0
+    fi
+    if [ -n "$ROM_SRC" ] && [ "$(stamp_value ROM_MD5)" != "$ROM_MD5" ]; then
+        SETUP_REASON="a different ROM was given"
+        return 0
+    fi
+    return 1
+}
+
+build_label() {
+    local label="v$VERSION"
+    if git -C "$REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1 &&
+        [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no -- . ':!rom' 2> /dev/null)" ]; then
+        label+="-modified"
+    fi
+    printf '%s' "$label"
+}
+
+write_release_files() {
+    local label="$1" bps="$2" zip="$3"
+    python3 - "$REPO_ROOT" "$label" "$bps" "$zip" "$USA_MD5" << 'EOF'
+import os, sys, zipfile
+root, label, bps, zip_path, md5 = sys.argv[1:]
+with open(os.path.join(root, "tools", "release", "HOW-TO-PLAY.txt")) as f:
+    howto = f.read().replace("{LABEL}", label).replace("{MD5}", md5).replace("{BPS}", os.path.basename(bps))
+with open(os.path.join(root, "CHANGELOG.md")) as f:
+    changelog = f.read()
+with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+    z.write(bps, os.path.basename(bps))
+    z.writestr("HOW-TO-PLAY.txt", howto)
+    z.writestr("CHANGELOG.txt", changelog)
+EOF
+}
+
+cmd_build() {
+    local rom_arg=""
+    for a in "$@"; do
+        case "$a" in
+            --verbose | -v) VERBOSE=1 ;;
+            --yes | -y) ASSUME_YES=1 ;;
+            --jobs=*) JOBS="${a#--jobs=}" ;;
+            -*) fail "Unknown option for build: $a" "Run ./majora-city help" ;;
+            *) rom_arg="$a" ;;
+        esac
+    done
+    mkdir -p "$LOG_DIR"
+    local started=$SECONDS
+
+    printf '%sMajora City v%s%s: building the patch\n' "$B" "$VERSION" "$R"
+
+    step "Checking your computer"
+    if [ "${MC_SKIP_DOCTOR:-0}" = 1 ]; then
+        note "(skipped)"
+    else
+        check_prereqs
+        if [ ${#MISSING[@]} -gt 0 ]; then
+            warn "Missing:"
+            for m in "${MISSING[@]}"; do note "  - $m"; done
+            if command -v apt-get > /dev/null && confirm "Install them now?"; then
+                install_prereqs
+                check_prereqs
+            fi
+            [ ${#MISSING[@]} -eq 0 ] || fail "Some things the build needs aren't installed." "$(install_hint)"
+        fi
+        ok "Build tools installed"
+    fi
+
+    step "Checking your ROM"
+    find_rom "$rom_arg"
+    if [ -n "$ROM_SRC" ]; then
+        ok "$(python3 "$REPO_ROOT/tools/rom.py" identify "$ROM_SRC")"
+        ROM_MD5="$(python3 "$REPO_ROOT/tools/rom.py" prepare "$ROM_SRC" "$LOG_DIR/.rom-check.z64" | tail -n 1)"
+        rm -f "$LOG_DIR/.rom-check.z64"
+    else
+        ROM_MD5="$(stamp_value ROM_MD5)"
+        ok "Using the ROM from your last build"
+    fi
+
+    step "Getting the Majora's Mask decompilation"
+    if [ -d "$DECOMP_DIR/.git" ] && git -C "$DECOMP_DIR" cat-file -e "${DECOMP_COMMIT}^{commit}" 2> /dev/null; then
+        ok "Already downloaded (zeldaret/mm ${DECOMP_COMMIT:0:12})"
+    else
+        run_logged "$LOG_DIR/download.log" ensure_decomp ||
+            { show_log_tail "$LOG_DIR/download.log"; fail "Downloading the decompilation failed." "Check your internet connection and try again."; }
+        ok "Downloaded zeldaret/mm ${DECOMP_COMMIT:0:12}"
+    fi
+
+    step "One-time setup"
+    if setup_needed; then
+        note "Needed because: $SETUP_REASON."
+        note "Extracting the game's files and test-building the original game. This takes 10-30 minutes,"
+        note "once. Later builds only take seconds to a few minutes."
+        reset_decomp
+        if [ -n "$ROM_SRC" ]; then
+            python3 "$REPO_ROOT/tools/rom.py" prepare "$ROM_SRC" "$BASEROM" > /dev/null
+        fi
+        [ -f "$BASEROM" ] || fail "The ROM from your last build is gone." "Run: ./majora-city build \"/path/to/your/rom.z64\""
+        rm -f "$STAMP"
+        if ! run_logged "$LOG_DIR/setup.log" "$MAKE_CMD" -C "$DECOMP_DIR" init -j"$JOBS" VERSION="$MC_VERSION"; then
+            show_log_tail "$LOG_DIR/setup.log"
+            fail "The one-time setup failed. Full log: $LOG_DIR/setup.log" \
+                "Most often a build tool is missing: run ./majora-city doctor" \
+                "If the log mentions a checksum (\"FAILED\"), the ROM isn't the clean USA version."
+        fi
+        printf 'DECOMP_COMMIT=%s\nROM_MD5=%s\nMC_VERSION=%s\n' "$DECOMP_COMMIT" "$ROM_MD5" "$MC_VERSION" > "$STAMP"
+        ok "Setup complete ($(fmt_time $((SECONDS - started))))"
+    else
+        ok "Already done"
+    fi
+
+    step "Building Majora City"
+    python3 "$REPO_ROOT/tools/gen_skyline.py" --check > /dev/null ||
+        fail "The generated skyline data is out of date (a developer forgot to regenerate it)." "Run: python3 tools/gen_skyline.py"
+    python3 "$REPO_ROOT/tools/apply.py" --decomp "$DECOMP_DIR" --commit "$DECOMP_COMMIT" --quiet ||
+        fail "Couldn't apply Majora City's changes to the decompilation."
+    local build_start=$SECONDS
+    if ! run_logged "$LOG_DIR/build.log" "$MAKE_CMD" -C "$DECOMP_DIR" -j"$JOBS" VERSION="$MC_VERSION" COMPARE=0 rom compress; then
+        show_log_tail "$LOG_DIR/build.log"
+        fail "The build failed. Full log: $LOG_DIR/build.log" \
+            "If you changed code, the error is above. Otherwise please report it with that log file."
+    fi
+    local built="$DECOMP_DIR/build/$MC_VERSION/mm-$MC_VERSION-compressed.z64"
+    [ -f "$built" ] || fail "The build finished but $built is missing."
+    ok "Built ($(fmt_time $((SECONDS - build_start))))"
+
+    step "Creating the patch"
+    local label commit name
+    label="$(build_label)"
+    commit="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2> /dev/null || echo unknown)"
+    name="MajoraCity-$label"
+    mkdir -p "$DIST_DIR"
+    python3 "$REPO_ROOT/tools/bps.py" create "$BASEROM" "$built" "$DIST_DIR/$name.bps" --metadata "Majora City $label
+Commit: $commit
+Built: $(date -u +%Y-%m-%dT%H:%MZ)
+Apply to: The Legend of Zelda: Majora's Mask (USA), MD5 $USA_MD5" > /dev/null ||
+        fail "Creating the patch failed."
+    cp "$built" "$DIST_DIR/$name.z64"
+    write_release_files "$label" "$DIST_DIR/$name.bps" "$DIST_DIR/$name.zip"
+    ok "Patch verified: it turns your ROM into exactly the ROM that was built"
+
+    local size
+    size="$(( ($(wc -c < "$DIST_DIR/$name.bps") + 1023) / 1024 ))"
+    printf '\n%s✓ Done in %s.%s\n\n' "$GRN" "$(fmt_time $((SECONDS - started)))" "$R"
+    printf '  %-7s %s  (%s KB)\n' "Patch" "dist/$name.bps" "$size"
+    printf '  %-7s %s  (patch + instructions, ready to share)\n' "Share" "dist/$name.zip"
+    printf '  %-7s %s  (your patched ROM: play it, but don'"'"'t share it)\n' "Play" "dist/$name.z64"
+    if [[ "$label" == *-modified ]]; then
+        printf '\n  %sNote:%s built with uncommitted changes, so the name ends in "-modified".\n' "$YEL" "$R"
+    fi
+    printf '\n  Next time, after new changes: %s./majora-city update%s\n' "$B" "$R"
+}
+
+# ------------------------------------------------------------------------------------------------------------------
+# other commands
+# ------------------------------------------------------------------------------------------------------------------
+
+cmd_update() {
+    git -C "$REPO_ROOT" rev-parse --git-dir > /dev/null 2>&1 || fail "This folder isn't a git clone, so it can't update itself." \
+        "Download the latest version from https://github.com/StormEf4/Majora-City- instead."
+    local before after
+    before="$VERSION"
+    printf '%sGetting the latest Majora City changes...%s\n' "$B" "$R"
+    if [ -n "$(git -C "$REPO_ROOT" status --porcelain --untracked-files=no)" ]; then
+        fail "You have local changes, so updating could overwrite them." \
+            "Keep them with: git stash   (then ./majora-city update, then git stash pop)"
+    fi
+    git -C "$REPO_ROOT" pull --ff-only || fail "Updating failed." "Check your internet connection, or run: git status"
+    after="$(tr -d ' \n\r' < "$REPO_ROOT/VERSION")"
+    if [ "$before" != "$after" ]; then
+        ok "Updated from v$before to v$after"
+    else
+        ok "Up to date (v$after)"
+    fi
+    # Re-run the new version of this script, which may itself have changed.
+    exec "$REPO_ROOT/majora-city" build "$@"
+}
+
+cmd_patch() {
+    [ $# -ge 2 ] || fail "Usage: ./majora-city patch YOUR-ROM.z64 MajoraCity-vX.Y.Z.bps [OUTPUT.z64]"
+    local rom bps out
+    rom="$(clean_path "$1")"
+    bps="$(clean_path "$2")"
+    out="${3:-${bps%.bps}.z64}"
+    local msg data
+    if ! msg="$(python3 "$REPO_ROOT/tools/rom.py" identify "$rom" 2>&1)"; then
+        fail "This ROM can't be used." "$msg"
+    fi
+    data="$(mktemp)"
+    python3 "$REPO_ROOT/tools/rom.py" prepare "$rom" "$data" > /dev/null
+    python3 "$REPO_ROOT/tools/bps.py" apply "$data" "$bps" "$out" > /dev/null || { rm -f "$data"; fail "Patching failed."; }
+    rm -f "$data"
+    ok "Wrote $out"
+}
+
+cmd_info() {
+    [ $# -eq 1 ] || fail "Usage: ./majora-city info MajoraCity-vX.Y.Z.bps"
+    python3 "$REPO_ROOT/tools/bps.py" info "$(clean_path "$1")"
+}
+
+cmd_clean() {
+    if [ "${1:-}" = "--all" ]; then
+        # Keep the installed ROM so the next build doesn't ask for it again.
+        local keep=""
+        if [ -f "$BASEROM" ]; then
+            keep="$(mktemp)"
+            cp "$BASEROM" "$keep"
+        fi
+        rm -rf "$DECOMP_DIR" "$LOG_DIR"
+        if [ -n "$keep" ]; then
+            mkdir -p "$ROM_DIR"
+            mv "$keep" "$ROM_DIR/MajorasMask-USA.z64"
+            ok "Kept your ROM as rom/MajorasMask-USA.z64"
+        fi
+        ok "Removed the build workspace. The next build redoes the one-time setup."
+    else
+        [ -d "$DECOMP_DIR" ] && rm -rf "$DECOMP_DIR/build"
+        ok "Removed build output. The next build recompiles everything (setup is kept)."
+    fi
+}
+
+cmd_help() {
+    cat << EOF
+${B}Majora City v$VERSION${R}
+
+  ${B}./majora-city build${R} [ROM]        Build the patch. The first run sets everything up (10-30 min);
+                                    later runs only rebuild what changed.
+      ROM: your Majora's Mask (USA) dump (.z64/.n64/.v64/.zip). Not needed if it's in rom/
+      or you've built before. Options: --verbose, --jobs=N, --yes
+  ${B}./majora-city update${R}             Get the latest Majora City changes, then build.
+  ${B}./majora-city doctor${R} [--install] Check this computer has what the build needs.
+  ${B}./majora-city patch${R} ROM BPS [OUT] Apply a Majora City patch to your ROM.
+  ${B}./majora-city info${R} BPS           Show which version a patch is.
+  ${B}./majora-city clean${R} [--all]      Remove build output (--all: the whole workspace).
+
+Output goes to dist/. Step-by-step guide: BUILDING.md
+EOF
+}
+
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift
+case "$cmd" in
+    build) cmd_build "$@" ;;
+    update) cmd_update "$@" ;;
+    doctor) cmd_doctor "$@" ;;
+    patch) cmd_patch "$@" ;;
+    info) cmd_info "$@" ;;
+    clean) cmd_clean "$@" ;;
+    version | --version) echo "Majora City v$VERSION" ;;
+    help | -h | --help) cmd_help ;;
+    *) cmd_help; exit 1 ;;
+esac

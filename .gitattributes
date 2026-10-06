@@ -1,0 +1,6 @@
+# Shell scripts must keep Unix line endings, even when cloned on Windows and run through WSL.
+*.sh text eol=lf
+majora-city text eol=lf
+*.py text eol=lf
+*.patch text eol=lf
+*.cmd text eol=crlf

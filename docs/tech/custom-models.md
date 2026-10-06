@@ -51,7 +51,7 @@ the player's ROM.)*
    `include/tables/object_table.h` and a matching segment in `spec`. New objects are appended, never inserted.
 5. **Use it** from an actor: set the profile's object ID to `OBJECT_MC_<NAME>`, and the engine loads it before
    the actor initialises.
-6. `tools/check.sh --ido`, then `tools/build.sh`, then test in the emulator.
+6. `tools/check.sh --ido`, then `./majora-city build`, then test in the emulator.
 
 ### Budgets & style
 | Thing | Triangle budget | Texture budget |

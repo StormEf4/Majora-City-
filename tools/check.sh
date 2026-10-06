@@ -26,7 +26,7 @@ cd "$DECOMP_DIR"
 VERSION_MACRO="$(echo "$MC_VERSION" | tr 'a-z.-' 'A-Z__')"
 IINC=(-Iinclude -Iinclude/libc -Isrc -I"build/$MC_VERSION" -I. -I"extracted/$MC_VERSION")
 # Without a ROM, a few ROM-extracted headers don't exist yet. These minimal stand-ins come last on the include
-# path, so the real headers always win once tools/setup.sh has extracted them.
+# path, so the real headers always win once ./majora-city build has extracted them.
 IINC+=(-I"$REPO_ROOT/tools/check_stubs")
 [ -d "extracted/$MC_VERSION" ] || echo "  (no extracted assets: using tools/check_stubs for ROM-only headers)"
 C_DEFINES=(-D_MIPS_SZLONG=32 -DF3DEX_GBI_2 -DF3DEX_GBI_PL -DGBI_DOWHILE -DMM_VERSION="$VERSION_MACRO" -D_LANGUAGE_C)

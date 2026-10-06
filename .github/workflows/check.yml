@@ -20,3 +20,13 @@ jobs:
 
       - name: Skyline previews render
         run: python3 tools/preview_skyline.py --layout Field --time dawn --out /tmp/preview.png
+
+  build-flow:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: End-to-end test of ./majora-city (fake ROM, no Nintendo data)
+        run: |
+          git config --global init.defaultBranch main
+          tools/test_cli.sh

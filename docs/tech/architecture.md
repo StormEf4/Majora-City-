@@ -25,20 +25,23 @@ patch.
 | `mod/` | New files, laid out exactly as they go into the decomp tree. `tools/apply.sh` refuses to let these overwrite a decomp file. |
 | `patches/` | Unified diffs against the pinned decomp, one per engine file, applied in order. |
 | `decomp.lock` | The decomp repository URL and commit. |
-| `tools/` | `setup.sh`, `apply.sh`, `build.sh`, `check.sh`, `bps.py`, `gen_skyline.py`, `preview_skyline.py`, `check_stubs/` |
+| `majora-city` | The user-facing builder: `build`, `update`, `doctor`, `patch`, `info`, `clean` (see BUILDING.md). |
+| `tools/` | `apply.py` (incremental), `check.sh`, `test_cli.sh`, `rom.py`, `bps.py`, `gen_skyline.py`, `preview_skyline.py`, `check_stubs/` |
+| `VERSION`, `CHANGELOG.md` | The patch version (names the `.bps`) and player-facing release notes. |
 | `docs/design/` | Game design: story, world, cast, mechanics, masks, side missions, opening storyboard. |
 | `docs/tech/` | This file and the custom-model pipeline. |
 
 ## Workflow
 
 ```bash
-tools/setup.sh /path/to/MajorasMask-US.z64   # once: fetch decomp, install ROM, extract assets, build vanilla
-tools/build.sh                               # apply mod + patches, build the ROM, write dist/majora-city.bps
+./majora-city build [ROM]    # first run: fetch decomp, check + install ROM, extract assets, build vanilla;
+                             # every run: apply mod + patches, build, write dist/MajoraCity-v<VERSION>.bps/.zip/.z64
+./majora-city update         # git pull, then build
 tools/check.sh --ido                         # no ROM needed: data, patches, C checks, IDO compile
 ```
 
 `build/mm` is a **managed workspace**. Every `apply.sh` run resets its tracked files to the pinned commit,
-re-applies `patches/` and re-copies `mod/`. Edit files in this repository, never in `build/mm`. Extracted assets,
+re-applies `patches/` and re-copies `mod/`, writing only files whose content changed so `make` stays incremental. Edit files in this repository, never in `build/mm`. Extracted assets,
 the ROM and build output are untracked there and survive.
 
 ### Changing an engine file
@@ -121,12 +124,13 @@ are fine (the decomp compiles with `-Xcpluscomm`). `check.sh` enforces `-Wdeclar
 |---|---|---|
 | `tools/check.sh` | Generated data is current; BPS round-trips; patches apply to the pinned commit; all Majora City C (and every patched engine file) type-checks against the real decomp headers; the text bank encodes and compiles | Nothing (no ROM) |
 | `tools/check.sh --ido` | The same files compile with IDO 7.1, the compiler Nintendo used | Network once (downloads IDO recomp) |
-| `tools/build.sh` | Full link, relocation and ROM build | Your ROM |
+| `tools/test_cli.sh` | The whole `./majora-city` flow (setup, rebuild, update, patch naming, bad ROMs) with a fake ROM and a stand-in for `make` | Nothing |
+| `./majora-city build` | Full link, relocation and ROM build | Your ROM |
 | Emulator / hardware | Behaviour, tuning, performance | Your ROM + Ares / EverDrive |
 
 `tools/check_stubs/` provides minimal stand-ins for the few ROM-extracted headers the decomp's global headers
 include, so the no-ROM check can run. They come last on the include path, so the real extracted headers always
-win after `setup.sh`.
+win after the one-time setup.
 
 ## Budgets
 

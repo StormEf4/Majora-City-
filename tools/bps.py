@@ -5,8 +5,9 @@ BPS patch creator / applier for distributing Majora City.
 We never distribute the game. Players apply a .bps patch to their own US 1.0 dump. This tool needs only the
 Python standard library.
 
-    python3 tools/bps.py create  <original.z64> <modified.z64> <out.bps>
+    python3 tools/bps.py create  <original.z64> <modified.z64> <out.bps> [--metadata TEXT]
     python3 tools/bps.py apply   <original.z64> <patch.bps> <out.z64>
+    python3 tools/bps.py info    <patch.bps>
     python3 tools/bps.py selftest
 
 Input ROMs in byte-swapped (.v64) or little-endian (.n64) order are converted to big-endian (.z64) first, so
@@ -99,12 +100,13 @@ def match_length(a, a_pos, b, b_pos, limit):
     return n
 
 
-def create(source, target):
+def create(source, target, metadata=b""):
     source, target = to_z64(source), to_z64(target)
     out = bytearray(b"BPS1")
     write_number(out, len(source))
     write_number(out, len(target))
-    write_number(out, 0)  # no metadata
+    write_number(out, len(metadata))
+    out.extend(metadata)
 
     index = {}
     for off in range(0, len(source) - BLOCK + 1, BLOCK):
@@ -166,6 +168,24 @@ def create(source, target):
     out.extend(zlib.crc32(target).to_bytes(4, "little"))
     out.extend(zlib.crc32(out).to_bytes(4, "little"))
     return bytes(out)
+
+
+def read_info(patch):
+    """Header fields and metadata of a patch, without applying it."""
+    if patch[:4] != b"BPS1":
+        raise ValueError("not a BPS patch")
+    pos = 4
+    source_size, pos = read_number(patch, pos)
+    target_size, pos = read_number(patch, pos)
+    meta_size, pos = read_number(patch, pos)
+    return {
+        "source_size": source_size,
+        "target_size": target_size,
+        "metadata": patch[pos : pos + meta_size].decode("utf-8", "replace"),
+        "source_crc": int.from_bytes(patch[-12:-8], "little"),
+        "target_crc": int.from_bytes(patch[-8:-4], "little"),
+        "patch_ok": zlib.crc32(patch[:-4]) == int.from_bytes(patch[-4:], "little"),
+    }
 
 
 def apply(source, patch):
@@ -261,12 +281,18 @@ def selftest():
     assert apply(bytes(v64), patch) == mod
     assert apply(bytes(n64), patch) == mod
 
+    # Metadata is carried in the header and doesn't disturb the patch.
+    meta = "Majora City v0.0.0-test\ncommit 0000000".encode()
+    patch = create(z64, mod, meta)
+    assert apply(z64, patch) == mod
+    assert read_info(patch)["metadata"] == meta.decode()
+
     # A shifted block (as in a recompressed ROM) must be encoded as copies, not literals.
     big = bytes(rng.getrandbits(8) for _ in range(200000))
     shifted = big[:1000] + b"\x00" * 64 + big[1000:]
     assert len(create(big, shifted)) < 200, "moved data should be copied from the source"
 
-    print("bps selftest: %d round trips OK" % (cases + 3))
+    print("bps selftest: %d round trips OK" % (cases + 4))
 
 
 def main():
@@ -276,10 +302,13 @@ def main():
     c.add_argument("original")
     c.add_argument("modified")
     c.add_argument("out")
+    c.add_argument("--metadata", default="", help="text stored in the patch header (version, commit, ...)")
     a = sub.add_parser("apply")
     a.add_argument("original")
     a.add_argument("patch")
     a.add_argument("out")
+    i = sub.add_parser("info")
+    i.add_argument("patch")
     sub.add_parser("selftest")
     args = parser.parse_args()
 
@@ -287,17 +316,30 @@ def main():
         selftest()
         return 0
 
+    if args.cmd == "info":
+        with open(args.patch, "rb") as f:
+            patch = f.read()
+        try:
+            info = read_info(patch)
+        except ValueError as e:
+            print("error: %s" % e, file=sys.stderr)
+            return 1
+        print(info["metadata"] or "(no metadata)")
+        print("ROM size before: %d bytes, after: %d bytes" % (info["source_size"], info["target_size"]))
+        print("Patch file %s" % ("OK" if info["patch_ok"] else "is CORRUPT"))
+        return 0 if info["patch_ok"] else 1
+
     with open(args.original, "rb") as f:
         original = f.read()
 
     if args.cmd == "create":
         with open(args.modified, "rb") as f:
             modified = f.read()
-        patch = create(original, modified)
+        patch = create(original, modified, args.metadata.encode("utf-8"))
         assert apply(original, patch) == to_z64(modified), "internal error: patch does not round-trip"
         with open(args.out, "wb") as f:
             f.write(patch)
-        print("wrote %s (%d bytes)" % (args.out, len(patch)))
+        print("wrote %s (%d KB)" % (args.out, (len(patch) + 1023) // 1024))
     else:
         with open(args.patch, "rb") as f:
             patch = f.read()
