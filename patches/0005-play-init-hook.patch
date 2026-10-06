@@ -1,0 +1,22 @@
+diff --git a/src/code/z_play.c b/src/code/z_play.c
+index dc076fc..a77e1db 100644
+--- a/src/code/z_play.c
++++ b/src/code/z_play.c
+@@ -36,6 +36,7 @@ u8 sMotionBlurStatus;
+ #include "overlays/gamestates/ovl_opening/z_opening.h"
+ #include "overlays/gamestates/ovl_file_choose/z_file_select.h"
+ #include "libu64/debug.h"
++#include "mc/mc.h"
+ 
+ s32 gDbgCamEnabled = false;
+ u8 D_801D0D54 = false;
+@@ -2318,6 +2319,9 @@ void Play_Init(GameState* thisx) {
+         Actor_Spawn(&this->actorCtx, this, ACTOR_EN_TEST4, 0.0f, 0.0f, 0.0f, 0, 0, 0, 0);
+     }
+ 
++    // Majora City: spawn scene augmentations (skyline, opening director, ...) before entrance cutscenes start
++    McCore_OnPlayInit(this);
++
+     player = GET_PLAYER(this);
+ 
+     Camera_InitFocalActorSettings(&this->mainCamera, &player->actor);

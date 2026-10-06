@@ -1,0 +1,13 @@
+diff --git a/assets/text/message_data.h b/assets/text/message_data.h
+index 1b0ab44..af02940 100644
+--- a/assets/text/message_data.h
++++ b/assets/text/message_data.h
+@@ -1,5 +1,8 @@
+ #include "text/message_data.h"
+ 
++// Majora City text bank (IDs 0x4D00-0x4DFF)
++#include "mc_message_data.h"
++
+ /*
+  * The following two messages should be kept last and in this order.
+  * Message 0xFFFD must be last to not break the message debugger.

@@ -1,0 +1,13 @@
+diff --git a/Makefile b/Makefile
+index ce0b67c..a32916d 100644
+--- a/Makefile
++++ b/Makefile
+@@ -704,7 +704,7 @@ $(BUILD_DIR)/%.yar.o: $(BUILD_DIR)/%.o
+ $(BUILD_DIR)/baserom/%.o: $(EXTRACTED_DIR)/baserom/%
+ 	$(OBJCOPY) -I binary -O elf32-big $< $@
+ 
+-$(BUILD_DIR)/assets/text/message_data.enc.h: assets/text/message_data.h assets/text/charmap.txt
++$(BUILD_DIR)/assets/text/message_data.enc.h: assets/text/message_data.h assets/text/mc_message_data.h assets/text/charmap.txt
+ 	$(CPP) $(CPPFLAGS) -I$(EXTRACTED_DIR) $< | $(PYTHON) tools/text/msgenc.py --encoding nes --charmap assets/text/charmap.txt - $@
+ 
+ $(BUILD_DIR)/assets/text/message_data_staff.enc.h: assets/text/message_data_staff.h assets/text/charmap.txt

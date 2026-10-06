@@ -1,0 +1,12 @@
+# Decomp workspace, build output and release artifacts
+/build/
+/dist/
+
+# Never commit ROMs or patches made from them by accident
+*.z64
+*.n64
+*.v64
+*.bps
+
+__pycache__/
+*.pyc

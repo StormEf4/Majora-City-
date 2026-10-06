@@ -1,0 +1,31 @@
+diff --git a/src/code/z_sram_NES.c b/src/code/z_sram_NES.c
+index 0ac2da0..9f9541f 100644
+--- a/src/code/z_sram_NES.c
++++ b/src/code/z_sram_NES.c
+@@ -3,6 +3,7 @@
+ 
+ #include "sys_flashrom.h"
+ #include "z64horse.h"
++#include "mc/mc.h"
+ #include "overlays/gamestates/ovl_file_choose/z_file_select.h"
+ 
+ void Sram_SyncWriteToFlash(SramContext* sramCtx, s32 curPage, s32 numPages);
+@@ -439,6 +440,8 @@ void Sram_SaveEndOfCycle(PlayState* play) {
+     gSaveContext.save.day = 0;
+     gSaveContext.save.time = CLOCK_TIME(6, 0) - 1;
+ 
++    McCore_OnCycleReset();
++
+     gSaveContext.save.saveInfo.playerData.threeDayResetCount++;
+     if (gSaveContext.save.saveInfo.playerData.threeDayResetCount > 999) {
+         gSaveContext.save.saveInfo.playerData.threeDayResetCount = 999;
+@@ -1290,7 +1293,8 @@ void Sram_OpenSave(FileSelectState* fileSelect, SramContext* sramCtx) {
+             gSaveContext.save.day = 0;
+             gSaveContext.save.time = CLOCK_TIME(6, 0) - 1;
+         } else {
+-            gSaveContext.save.entrance = ENTRANCE(CUTSCENE, 0);
++            // Majora City: files that never reached Clock Town open on the ride into the city
++            gSaveContext.save.entrance = McCore_GetFreshFileEntrance();
+             gSaveContext.nextCutsceneIndex = 0;
+             gSaveContext.save.playerForm = PLAYER_FORM_HUMAN;
+         }

@@ -1,0 +1,11 @@
+diff --git a/include/tables/actor_table.h b/include/tables/actor_table.h
+index 38adcf6..b8a70d5 100644
+--- a/include/tables/actor_table.h
++++ b/include/tables/actor_table.h
+@@ -706,3 +706,6 @@
+ /* 0x2AF */ DEFINE_ACTOR(En_Invisible_Ruppe, ACTOR_EN_INVISIBLE_RUPPE, ALLOCTYPE_NORMAL, "En_Invisible_Ruppe")
+ /* 0x2B0 */ DEFINE_ACTOR(Obj_Ending, ACTOR_OBJ_ENDING, ALLOCTYPE_NORMAL, "Obj_Ending")
+ /* 0x2B1 */ DEFINE_ACTOR(En_Rsn, ACTOR_EN_RSN, ALLOCTYPE_NORMAL, "En_Rsn")
++// Majora City
++/* 0x2B2 */ DEFINE_ACTOR(Mc_Intro, ACTOR_MC_INTRO, ALLOCTYPE_NORMAL, "Mc_Intro")
++/* 0x2B3 */ DEFINE_ACTOR(Mc_Skyline, ACTOR_MC_SKYLINE, ALLOCTYPE_NORMAL, "Mc_Skyline")

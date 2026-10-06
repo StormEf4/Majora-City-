@@ -1,0 +1,22 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-multilib python3-numpy python3-pil
+
+      - name: Check (no ROM needed; includes an IDO 7.1 compile)
+        run: tools/check.sh --ido
+
+      - name: Skyline previews render
+        run: python3 tools/preview_skyline.py --layout Field --time dawn --out /tmp/preview.png

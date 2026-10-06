@@ -1,0 +1,4 @@
+# The zeldaret/mm decompilation commit Majora City is built against.
+# Bump deliberately, one milestone at a time, and regenerate patches/ if they stop applying.
+DECOMP_REPO=https://github.com/zeldaret/mm.git
+DECOMP_COMMIT=56fa21dd0031a17cfc9e355f609542617598a265

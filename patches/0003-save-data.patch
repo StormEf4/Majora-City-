@@ -1,0 +1,21 @@
+diff --git a/include/z64save.h b/include/z64save.h
+index 0b06f2a..4594ed0 100644
+--- a/include/z64save.h
++++ b/include/z64save.h
+@@ -9,6 +9,7 @@
+ #include "z64inventory.h"
+ #include "z64item.h"
+ #include "z64math.h"
++#include "mc/mc_save.h"
+ 
+ #include "unk.h"
+ 
+@@ -291,7 +292,7 @@ typedef struct SaveInfo {
+     /* 0x028 */ ItemEquips equips;
+     /* 0x04C */ Inventory inventory;
+     /* 0x0D4 */ PermanentSceneFlags permanentSceneFlags[120];
+-    /* 0xDF4 */ UNK_TYPE1 unk_DF4[0x54];
++    /* 0xDF4 */ McSaveData mc;                          // Majora City (was unk_DF4[0x54], unused in vanilla)
+     /* 0xE48 */ u32 dekuPlaygroundHighScores[3];
+     /* 0xE54 */ u32 pictoFlags0;                       // Flags set by `PictoActor`s if pictograph is valid
+     /* 0xE58 */ u32 pictoFlags1;                       // Flags set by Snap_ValidatePictograph() to record errors; volatile since that function is run many times in succession
